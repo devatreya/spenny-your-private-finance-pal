@@ -396,5 +396,12 @@ export const KNOWN_MERCHANTS: Record<string, MerchantMetadata> = {
     aliases: ["prime video", "amazon prime video"],
     confidence: 0.95,
   },
+  appleicloud: {
+    canonical_name: "Apple iCloud",
+    category: "Subscriptions",
+    subcategory: "Software",
+    aliases: ["apple bil", "apple bill", "apple com bil", "apple com bill", "icloud storage"],
+    confidence: 0.95,
+  },
 };
 
