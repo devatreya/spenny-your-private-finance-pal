@@ -122,16 +122,20 @@ export const useFinanceStore = () => {
       const rawLower = t.merchant_raw.toLowerCase();
       const combined = ` ${merchantLower} ${rawLower} `;
 
-      // ----- Uber handling -----
-      const containsUber = combined.includes('uber');
+      // ----- Uber handling (MUST come before category check) -----
+      const containsUber = combined.includes('uber') || combined.includes('ubr');
       const containsEats = combined.includes('eats');
+      const containsTrip = combined.includes('trip');
       
-      const isUberSubscription = !containsEats && uberSubscriptionPatterns.some(p =>
+      // Only Uber One patterns should be subscriptions
+      const isUberSubscription = !containsEats && !containsTrip && uberSubscriptionPatterns.some(p =>
         combined.includes(p)
       );
 
       // Any Uber transaction that is NOT clearly a membership → NOT a subscription
+      // This check comes BEFORE category check to override any incorrect categorization
       if (containsUber && !isUberSubscription) {
+        console.log('Excluding Uber transaction:', { merchant_canonical: t.merchant_canonical, merchant_raw: t.merchant_raw, amount: t.amount, containsEats, containsTrip });
         return false;
       }
 
