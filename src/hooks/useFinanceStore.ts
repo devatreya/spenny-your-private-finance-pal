@@ -124,7 +124,9 @@ export const useFinanceStore = () => {
 
       // ----- Uber handling -----
       const containsUber = combined.includes('uber');
-      const isUberSubscription = uberSubscriptionPatterns.some(p =>
+      const containsEats = combined.includes('eats');
+      
+      const isUberSubscription = !containsEats && uberSubscriptionPatterns.some(p =>
         combined.includes(p)
       );
 
