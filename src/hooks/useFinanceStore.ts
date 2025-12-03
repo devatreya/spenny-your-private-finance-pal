@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Transaction, Category } from '@/lib/parser/schema';
 
 export interface ChatMessage {
@@ -7,6 +7,30 @@ export interface ChatMessage {
   content: string;
   timestamp: Date;
 }
+
+// Helper: Get date range from transactions
+const getDateRange = (transactions: Transaction[]): { start: string; end: string } | null => {
+  if (transactions.length === 0) return null;
+  const dates = transactions.map(t => t.date).sort();
+  return { start: dates[0], end: dates[dates.length - 1] };
+};
+
+// Helper: Format date for display
+const formatDateRange = (range: { start: string; end: string } | null): string => {
+  if (!range) return 'your statement';
+  const start = new Date(range.start).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const end = new Date(range.end).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return `${start} to ${end}`;
+};
+
+// Helper: Check if transaction is spending (Money Out)
+const isSpending = (t: Transaction): boolean => t.amount < 0;
+
+// Helper: Check if transaction is income (Money In)
+const isIncome = (t: Transaction): boolean => t.amount > 0;
+
+// Helper: Get absolute amount for display
+const absAmount = (amount: number): number => Math.abs(amount);
 
 export const useFinanceStore = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -29,108 +53,181 @@ export const useFinanceStore = () => {
     return message;
   }, []);
 
+  // Computed aggregates
+  const aggregates = useMemo(() => {
+    const spending = transactions.filter(isSpending);
+    const income = transactions.filter(isIncome);
+    const dateRange = getDateRange(transactions);
+    
+    // Subscriptions: Money Out + category is Subscriptions
+    const subscriptionTxns = spending.filter(t => t.category === 'Subscriptions');
+    const uniqueSubscriptions = [...new Set(subscriptionTxns.map(t => t.merchant_canonical))];
+    
+    // Category totals (spending only)
+    const byCategory: Record<string, { total: number; count: number }> = {};
+    spending.forEach(t => {
+      if (!byCategory[t.category]) {
+        byCategory[t.category] = { total: 0, count: 0 };
+      }
+      byCategory[t.category].total += absAmount(t.amount);
+      byCategory[t.category].count += 1;
+    });
+
+    return {
+      totalSpending: spending.reduce((sum, t) => sum + absAmount(t.amount), 0),
+      totalIncome: income.reduce((sum, t) => sum + t.amount, 0),
+      spendingCount: spending.length,
+      incomeCount: income.length,
+      dateRange,
+      subscriptionTxns,
+      uniqueSubscriptions,
+      subscriptionTotal: subscriptionTxns.reduce((sum, t) => sum + absAmount(t.amount), 0),
+      byCategory,
+    };
+  }, [transactions]);
+
   const analyzeQuery = useCallback((query: string): string => {
     const q = query.toLowerCase();
+    const dateRangeStr = formatDateRange(aggregates.dateRange);
     
     if (transactions.length === 0) {
       return "I don't have any transaction data loaded yet. Please upload your bank statement first.";
     }
 
-    // Category spending query
+    // ===== SUBSCRIPTIONS =====
+    if (q.includes('subscription')) {
+      const { subscriptionTxns, uniqueSubscriptions, subscriptionTotal } = aggregates;
+      
+      if (uniqueSubscriptions.length === 0) {
+        return `**No subscriptions found**\n\nI couldn't find any subscription transactions in your data (${dateRangeStr}).`;
+      }
+
+      // "How many subscriptions do I have?" → count unique services
+      if (q.includes('how many')) {
+        const breakdown = uniqueSubscriptions.map(name => {
+          const txns = subscriptionTxns.filter(t => t.merchant_canonical === name);
+          const total = txns.reduce((sum, t) => sum + absAmount(t.amount), 0);
+          return `- **${name}**: £${total.toFixed(2)} (${txns.length} payment${txns.length > 1 ? 's' : ''})`;
+        }).join('\n');
+
+        return `**You have ${uniqueSubscriptions.length} subscription service${uniqueSubscriptions.length > 1 ? 's' : ''}**\n\n${breakdown}\n\n**Total:** £${subscriptionTotal.toFixed(2)}\n\n_Based on Money Out transactions from ${dateRangeStr}_`;
+      }
+
+      // General subscription query
+      const breakdown = uniqueSubscriptions.map(name => {
+        const txns = subscriptionTxns.filter(t => t.merchant_canonical === name);
+        const total = txns.reduce((sum, t) => sum + absAmount(t.amount), 0);
+        return `- **${name}**: £${total.toFixed(2)}`;
+      }).join('\n');
+
+      return `**Your Subscriptions (${uniqueSubscriptions.length} services, £${subscriptionTotal.toFixed(2)} total)**\n\n${breakdown}\n\n_Based on Money Out transactions from ${dateRangeStr}_`;
+    }
+
+    // ===== TOTAL SPENDING =====
+    if (q.includes('total') && (q.includes('spent') || q.includes('spending') || q.includes('spend'))) {
+      return `**Total Spending: £${aggregates.totalSpending.toFixed(2)}**\n\nThis is across ${aggregates.spendingCount} Money Out transactions from ${dateRangeStr}.`;
+    }
+
+    // ===== INCOME =====
+    if (q.includes('income') || q.includes('earned') || q.includes('received') || q.includes('money in')) {
+      if (aggregates.incomeCount === 0) {
+        return `**No income found**\n\nI couldn't find any Money In transactions in your data (${dateRangeStr}).`;
+      }
+      
+      const incomeTransactions = transactions.filter(isIncome);
+      const breakdown = incomeTransactions
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 5)
+        .map(t => `- ${t.merchant_canonical}: £${t.amount.toFixed(2)} (${t.date})`)
+        .join('\n');
+      
+      return `**Total Income: £${aggregates.totalIncome.toFixed(2)}**\n\nAcross ${aggregates.incomeCount} Money In transaction${aggregates.incomeCount > 1 ? 's' : ''} from ${dateRangeStr}.\n\n**Top income sources:**\n${breakdown}`;
+    }
+
+    // ===== NET / BALANCE =====
+    if (q.includes('net') || q.includes('balance') || q.includes('overall')) {
+      const net = aggregates.totalIncome - aggregates.totalSpending;
+      const sign = net >= 0 ? '+' : '-';
+      return `**Net Balance: ${sign}£${absAmount(net).toFixed(2)}**\n\n- Money In: £${aggregates.totalIncome.toFixed(2)}\n- Money Out: £${aggregates.totalSpending.toFixed(2)}\n\n_For period ${dateRangeStr}_`;
+    }
+
+    // ===== CATEGORY SPENDING =====
     const categoryMatch = q.match(/(?:how much|spent|spend|spending).*(?:on|for)\s+(\w+)/i);
     if (categoryMatch) {
       const searchTerm = categoryMatch[1].toLowerCase();
-      const filtered = transactions.filter(t => 
+      const spending = transactions.filter(isSpending);
+      
+      const filtered = spending.filter(t => 
         t.category.toLowerCase().includes(searchTerm) || 
         t.merchant_canonical.toLowerCase().includes(searchTerm) ||
         t.merchant_raw.toLowerCase().includes(searchTerm) ||
         (t.description?.toLowerCase().includes(searchTerm))
       );
-      const total = filtered
-        .filter(t => t.amount < 0)
-        .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+      
+      const total = filtered.reduce((sum, t) => sum + absAmount(t.amount), 0);
       
       if (filtered.length === 0) {
-        return `I couldn't find any transactions matching "${searchTerm}".`;
+        return `I couldn't find any Money Out transactions matching "${searchTerm}" in your data (${dateRangeStr}).`;
       }
       
-      return `You spent **£${total.toFixed(2)}** on ${searchTerm} across ${filtered.length} transaction(s).`;
+      return `**Spending on ${searchTerm}: £${total.toFixed(2)}**\n\nAcross ${filtered.length} Money Out transaction${filtered.length > 1 ? 's' : ''} from ${dateRangeStr}.`;
     }
 
-    // Subscriptions breakdown
-    if (q.includes('subscription')) {
-      const subs = transactions.filter(t => t.category === 'Subscriptions');
-      if (subs.length === 0) {
-        return "I couldn't find any subscription transactions.";
-      }
-      
-      const total = subs.reduce((sum, t) => sum + Math.abs(t.amount), 0);
-      const breakdown = subs.map(s => `- ${s.merchant_canonical}: £${Math.abs(s.amount).toFixed(2)}`).join('\n');
-      
-      return `**Your Subscriptions (£${total.toFixed(2)} total):**\n\n${breakdown}`;
-    }
-
-    // Total spending
-    if (q.includes('total') && (q.includes('spent') || q.includes('spending'))) {
-      const total = transactions
-        .filter(t => t.amount < 0)
-        .reduce((sum, t) => sum + Math.abs(t.amount), 0);
-      return `Your total spending is **£${total.toFixed(2)}** across ${transactions.filter(t => t.amount < 0).length} transactions.`;
-    }
-
-    // Category breakdown
+    // ===== BREAKDOWN / CATEGORIES =====
     if (q.includes('breakdown') || q.includes('categories') || q.includes('summary')) {
-      const byCategory: Record<string, number> = {};
-      transactions.filter(t => t.amount < 0).forEach(t => {
-        byCategory[t.category] = (byCategory[t.category] || 0) + Math.abs(t.amount);
-      });
+      const sorted = Object.entries(aggregates.byCategory)
+        .sort((a, b) => b[1].total - a[1].total);
       
-      const sorted = Object.entries(byCategory).sort((a, b) => b[1] - a[1]);
-      const breakdown = sorted.map(([cat, amt]) => `- **${cat}:** £${amt.toFixed(2)}`).join('\n');
-      const total = sorted.reduce((sum, [, amt]) => sum + amt, 0);
-      
-      return `**Spending Breakdown (£${total.toFixed(2)} total):**\n\n${breakdown}`;
-    }
-
-    // Largest transactions
-    if (q.includes('largest') || q.includes('biggest') || q.includes('highest')) {
-      const sorted = [...transactions]
-        .filter(t => t.amount < 0)
-        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
-        .slice(0, 5);
-      const list = sorted.map((t, i) => 
-        `${i + 1}. ${t.merchant_canonical}: £${Math.abs(t.amount).toFixed(2)} (${t.date})`
+      const breakdown = sorted.map(([cat, data]) => 
+        `- **${cat}:** £${data.total.toFixed(2)} (${data.count} txn${data.count > 1 ? 's' : ''})`
       ).join('\n');
       
-      return `**Your 5 Largest Transactions:**\n\n${list}`;
+      return `**Spending Breakdown (£${aggregates.totalSpending.toFixed(2)} total)**\n\n${breakdown}\n\n_Based on Money Out transactions from ${dateRangeStr}_`;
     }
 
-    // Income
-    if (q.includes('income') || q.includes('earned') || q.includes('received')) {
-      const income = transactions.filter(t => t.amount > 0);
-      const total = income.reduce((sum, t) => sum + t.amount, 0);
+    // ===== LARGEST TRANSACTIONS =====
+    if (q.includes('largest') || q.includes('biggest') || q.includes('highest')) {
+      const sorted = transactions
+        .filter(isSpending)
+        .sort((a, b) => absAmount(b.amount) - absAmount(a.amount))
+        .slice(0, 5);
       
-      if (income.length === 0) {
-        return "I couldn't find any income transactions.";
-      }
+      const list = sorted.map((t, i) => 
+        `${i + 1}. **${t.merchant_canonical}**: £${absAmount(t.amount).toFixed(2)} (${t.date})`
+      ).join('\n');
       
-      return `**Total Income:** £${total.toFixed(2)} across ${income.length} transaction(s).`;
+      return `**Your 5 Largest Transactions (Money Out)**\n\n${list}\n\n_From ${dateRangeStr}_`;
     }
 
-    // Merchant-specific
-    const merchants = [...new Set(transactions.map(t => t.merchant_canonical))];
+    // ===== MERCHANT-SPECIFIC =====
+    const merchants = [...new Set(transactions.map(t => t.merchant_canonical.toLowerCase()))];
     for (const merchant of merchants) {
-      if (q.includes(merchant.toLowerCase())) {
+      if (q.includes(merchant)) {
         const filtered = transactions.filter(t => 
-          t.merchant_canonical.toLowerCase() === merchant.toLowerCase()
+          t.merchant_canonical.toLowerCase() === merchant
         );
-        const total = filtered.reduce((sum, t) => sum + Math.abs(t.amount), 0);
-        return `You had **${filtered.length} transaction(s)** with ${merchant}, totaling **£${total.toFixed(2)}**.`;
+        const spending = filtered.filter(isSpending);
+        const income = filtered.filter(isIncome);
+        
+        let response = `**${filtered[0].merchant_canonical}**\n\n`;
+        
+        if (spending.length > 0) {
+          const total = spending.reduce((sum, t) => sum + absAmount(t.amount), 0);
+          response += `- Money Out: £${total.toFixed(2)} (${spending.length} transaction${spending.length > 1 ? 's' : ''})\n`;
+        }
+        if (income.length > 0) {
+          const total = income.reduce((sum, t) => sum + t.amount, 0);
+          response += `- Money In: £${total.toFixed(2)} (${income.length} transaction${income.length > 1 ? 's' : ''})\n`;
+        }
+        
+        response += `\n_From ${dateRangeStr}_`;
+        return response;
       }
     }
 
-    return "I can help you analyze your spending! Try asking:\n- \"How much did I spend on Uber?\"\n- \"Give me a breakdown of my spending\"\n- \"What are my subscriptions?\"\n- \"What were my largest transactions?\"\n- \"How much income did I receive?\"";
-  }, [transactions]);
+    // ===== DEFAULT HELP =====
+    return `I can help you analyze your spending! Try asking:\n\n- "How much did I spend on food?"\n- "Give me a breakdown of my spending"\n- "How many subscriptions do I have?"\n- "What were my largest transactions?"\n- "How much income did I receive?"\n- "What's my net balance?"`;
+  }, [transactions, aggregates]);
 
   const clearData = useCallback(() => {
     setTransactions([]);
