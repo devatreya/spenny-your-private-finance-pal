@@ -511,7 +511,45 @@ function parseHSBCFormat(pdfDoc: PDFDocument): Transaction[] {
         // Common patterns: starts with ")))" (contactless), "VIS" (Visa), "CR" (credit), etc.
         const isMerchantLine = /^(\)\)\)|VIS\s|CR\s|DD\s|SO\s|TFR\s|ATM\s|CHQ\s)/i.test(normalizedLine);
         
-        if (isMerchantLine) {
+        // Also check for billing/subscription lines like "APPLE.COM/BIL 2.99 926.78"
+        // These have amount on the same line but no date prefix
+        const isBillingLine = /\.(com|co\.uk)\/bil/i.test(normalizedLine);
+        const hasAmountOnLine = /([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/.test(normalizedLine);
+        
+        if (isBillingLine && hasAmountOnLine) {
+          // Handle billing lines with amount on same line (e.g., "APPLE.COM/BIL 2.99 926.78")
+          const applicableDate = getDateForIndex(i);
+          
+          if (applicableDate) {
+            try {
+              const date = parseFlexibleDate(applicableDate);
+              // Extract amount - first number is the transaction, second is balance
+              const amountMatch = normalizedLine.match(/([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/);
+              if (amountMatch) {
+                const amount = -parseAmount(amountMatch[1]); // Assume debit for billing
+                const merchantPart = normalizedLine.replace(amountMatch[0], '').trim();
+                const merchant_raw = merchantPart;
+                const merchant_canonical = getCanonicalName(merchant_raw);
+                
+                console.log(`✅ Found billing transaction at line ${i}: ${date} | ${merchant_canonical} | ${amount}`);
+                
+                transactions.push({
+                  id: generateId(),
+                  date,
+                  amount,
+                  currency: 'GBP',
+                  merchant_raw,
+                  merchant_canonical,
+                  description: merchant_raw,
+                  category: 'Unknown',
+                  confidence: 0,
+                });
+              }
+            } catch (error) {
+              console.warn('Failed to parse billing transaction at line', i, error);
+            }
+          }
+        } else if (isMerchantLine) {
           // Look for amount on previous line
           const prevIndex = i - 1;
           if (prevIndex >= searchStartIndex) {
