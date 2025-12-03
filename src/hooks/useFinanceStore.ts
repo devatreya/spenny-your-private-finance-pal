@@ -146,6 +146,7 @@ export const useFinanceStore = () => {
 
       // ----- category-based subscriptions -----
       if (t.category === 'Subscriptions') {
+        console.log('Including via category:', { merchant_canonical: t.merchant_canonical, merchant_raw: t.merchant_raw, amount: t.amount });
         return true;
       }
 
@@ -160,6 +161,7 @@ export const useFinanceStore = () => {
       );
 
       if (matchesStrict || isAppleSubscription || isUberSubscription) {
+        console.log('Including subscription:', { merchant_canonical: t.merchant_canonical, merchant_raw: t.merchant_raw, amount: t.amount, category: t.category });
         return true;
       }
 
