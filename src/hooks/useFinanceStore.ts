@@ -64,7 +64,7 @@ export const useFinanceStore = () => {
       'netflix', 'spotify', 'disney', 'amazon prime', 'apple tv', 'apple music',
       'youtube', 'hbo', 'paramount', 'hulu', 'audible', 'kindle',
       'voxi', 'ee', 'o2', 'three', 'vodafone', 'giffgaff', 'sky', 'virgin media', 'bt',
-      'icloud', 'google one', 'dropbox', 'apple.com', 'uber one', 'pending.uber', 'ubr pending'
+      'icloud', 'google one', 'dropbox', 'apple.com', 'uber one', 'pending.uber', 'ubr pending uber'
     ];
 
     // Generic / fuzzy names that could be one-offs – we do NOT automatically treat these as subscriptions
@@ -86,6 +86,8 @@ export const useFinanceStore = () => {
       'pret ',
       'costa',
       'uber eats',
+      'uber * eats',
+      'eats pend',
       'deliveroo',
       'just eat'
     ];
