@@ -59,77 +59,73 @@ export const useFinanceStore = () => {
     const income = transactions.filter(isIncome);
     const dateRange = getDateRange(transactions);
     
-    // STRICT keywords: Count as subscription even with single transaction
+    // Services that are almost always subscriptions, even if they only appear once
     const strictSubscriptionKeywords = [
       'netflix', 'spotify', 'disney', 'amazon prime', 'apple tv', 'apple music',
-      'youtube premium', 'youtube', 'hbo', 'paramount', 'hulu', 'audible', 'kindle',
+      'youtube', 'hbo', 'paramount', 'hulu', 'audible', 'kindle',
       'voxi', 'ee', 'o2', 'three', 'vodafone', 'giffgaff', 'sky', 'virgin media', 'bt',
-      'icloud', 'google one', 'dropbox', 'google youtube'
+      'icloud', 'google one', 'dropbox'
     ];
-    
-    // FUZZY keywords: Only count if they recur OR category is Subscriptions
+
+    // Generic / fuzzy names that could be one-offs – we do NOT automatically treat these as subscriptions
     const fuzzySubscriptionKeywords = [
-      'gym', 'fitness', 'puregym', 'microsoft', 'adobe', 'notion', 'canva', 'chatgpt', 'openai'
+      'puregym', 'gym', 'fitness',
+      'adobe', 'microsoft',
+      'notion', 'canva',
+      'chatgpt', 'openai'
     ];
-    
-    // EXCLUSION keywords: These are NEVER subscriptions regardless of category
-    const exclusionKeywords = [
-      // Fuel stations
-      'bp', 'shell', 'esso', 'texaco', 'gulf', 'jet', 'murco', 'petrol', 'fuel',
-      // Coffee shops / cafes
-      'blank street', 'sq blank street', 'pret', 'costa', 'starbucks', 'nero', 'cafe', 'coffee',
-      // Ticket machines / transport pay-per-use
-      'ticket machine', 'lul ticket', 'tfl', 'oyster', 'station ticket',
-      // Food / restaurants
-      'uber eats', 'deliveroo', 'just eat', 'greggs', 'mcdonald', 'kfc', 'subway', 'nando'
+
+    // Things that should NEVER be treated as subscriptions, even if categorised badly
+    const nonSubscriptionMerchantPatterns = [
+      ' bp ',           // fuel station
+      'bp petrol',
+      'ticket machine', // LUL / station ticket machines
+      'lul ticket',
+      'blank street',   // coffee shop
+      'starbucks',
+      'pret ',
+      'costa',
+      'uber eats',
+      'deliveroo',
+      'just eat'
     ];
-    
-    // Helper to check if merchant matches keywords
-    const matchesKeywords = (t: Transaction, keywords: string[]): boolean => {
+
+    const subscriptionTxns = spending.filter(t => {
       const merchantLower = t.merchant_canonical.toLowerCase();
       const rawLower = t.merchant_raw.toLowerCase();
-      return keywords.some(kw => merchantLower.includes(kw) || rawLower.includes(kw));
-    };
-    
-    // Helper to check if transaction should be excluded from subscriptions
-    const isExcluded = (t: Transaction): boolean => {
-      // Check exclusion keywords
-      if (matchesKeywords(t, exclusionKeywords)) return true;
-      
-      // Exclude certain categories that are never subscriptions
-      const nonSubCategories = ['Transport', 'Groceries', 'Eating Out', 'Cash', 'Shopping'];
-      if (nonSubCategories.includes(t.category) && !matchesKeywords(t, strictSubscriptionKeywords)) {
+      const combined = ` ${merchantLower} ${rawLower} `; // leading/trailing space for patterns like " bp "
+
+      // 0) Explicitly exclude obvious non-subscription merchants
+      if (nonSubscriptionMerchantPatterns.some(p => combined.includes(p))) {
+        return false;
+      }
+
+      // 1) If category is Subscriptions and not obviously excluded, treat as subscription
+      if (t.category === 'Subscriptions') {
         return true;
       }
-      
-      return false;
-    };
-    
-    // Count transactions per merchant for fuzzy recurrence check
-    const merchantCounts = new Map<string, number>();
-    spending.forEach(t => {
-      const key = t.merchant_canonical.toLowerCase();
-      merchantCounts.set(key, (merchantCounts.get(key) || 0) + 1);
-    });
-    
-    const subscriptionTxns = spending.filter(t => {
-      // First check: Is this merchant excluded?
-      if (isExcluded(t)) return false;
-      
-      // Path A: Category is Subscriptions
-      if (t.category === 'Subscriptions') return true;
-      
-      // Path B: Strict keyword match (even once)
-      if (matchesKeywords(t, strictSubscriptionKeywords)) return true;
-      
-      // Path C: Fuzzy keyword match ONLY if it recurs (2+ transactions)
-      if (matchesKeywords(t, fuzzySubscriptionKeywords)) {
-        const count = merchantCounts.get(t.merchant_canonical.toLowerCase()) || 0;
-        return count >= 2;
+
+      // 2) Strict subscription merchants – treat as subscription even if they appear only once
+      const matchesStrict = strictSubscriptionKeywords.some(
+        kw => merchantLower.includes(kw) || rawLower.includes(kw)
+      );
+      if (matchesStrict) {
+        return true;
       }
-      
+
+      // 3) Fuzzy keywords are *not* enough on their own in a single-month statement.
+      //    We only rely on them if category is already Subscriptions (handled above).
+      const matchesFuzzy = fuzzySubscriptionKeywords.some(
+        kw => merchantLower.includes(kw) || rawLower.includes(kw)
+      );
+      if (matchesFuzzy) {
+        return false;
+      }
+
+      // Anything else is not a subscription
       return false;
     });
+
     const uniqueSubscriptions = [...new Set(subscriptionTxns.map(t => t.merchant_canonical))];
     
     // Category totals (spending only)
