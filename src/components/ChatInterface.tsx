@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ChatMessage } from '@/types/finance';
+import { ChatMessage } from '@/hooks/useFinanceStore';
 import { cn } from '@/lib/utils';
 
 interface ChatInterfaceProps {
