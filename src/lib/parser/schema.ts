@@ -407,7 +407,7 @@ export const KNOWN_MERCHANTS: Record<string, MerchantMetadata> = {
     canonical_name: "Uber One",
     category: "Subscriptions",
     subcategory: "Membership",
-    aliases: ["ubr pending ubr", "ubr pending", "pending ubr", "uber one"],
+    aliases: ["ubr pending uber", "ubr pending", "pending uber", "uber one"],
     confidence: 0.95,
   },
 };
