@@ -58,22 +58,36 @@ export const useFinanceStore = () => {
     const spending = transactions.filter(isSpending);
     const income = transactions.filter(isIncome);
     const dateRange = getDateRange(transactions);
-    
+
+    // ---------- SUBSCRIPTION HELPERS ----------
+
     // Services that are almost always subscriptions, even if they only appear once
     const strictSubscriptionKeywords = [
       'netflix', 'spotify', 'disney', 'amazon prime', 'apple tv', 'apple music',
       'youtube', 'hbo', 'paramount', 'hulu', 'audible', 'kindle',
       'voxi', 'ee', 'o2', 'three', 'vodafone', 'giffgaff', 'sky', 'virgin media', 'bt',
-      'icloud', 'google one', 'dropbox', 'apple.com'
+      'icloud', 'google one', 'dropbox'
     ];
 
-    // Uber subscription patterns - checked BEFORE non-subscription exclusions
+    // Apple storage / subscriptions show up under these patterns on most statements
+    const appleSubscriptionPatterns = [
+      'apple.com/bill',
+      'apple.com bill',
+      'apple.com/itunes',
+      'itunes.com/bill',
+      'apple services',
+      'apple.com services',
+      'apple.com/bill*icloud'
+    ];
+
+    // Uber One / membership patterns (subscription)
     const uberSubscriptionPatterns = [
-      'uber one',           // explicit membership wording
+      'uber one',
+      'uberone',
+      'uber pass',
+      'uber membership',
       'pending.uber',       // from "UBR* PENDING.UBER."
-      'ubr* pending.uber',  // raw format
-      'uber pass',          // other common membership labels
-      'uber membership'
+      'ubr* pending.uber'
     ];
 
     // Generic / fuzzy names that could be one-offs – we do NOT automatically treat these as subscriptions
@@ -84,7 +98,7 @@ export const useFinanceStore = () => {
       'chatgpt', 'openai'
     ];
 
-    // Things that should NEVER be treated as subscriptions, even if categorised badly
+    // Things that should NEVER be treated as subscriptions
     const nonSubscriptionMerchantPatterns = [
       ' bp ',           // fuel station
       'bp petrol',
@@ -96,11 +110,9 @@ export const useFinanceStore = () => {
       'costa',
       'uber eats',
       'ubereats',
-      'uber * eats',
-      'eats pend',
-      'deliveroo',
       'just eat',
-      ' trip.uber',     // typical ride descriptor
+      'deliveroo',
+      ' trip.uber',     // typical ride descriptor "UBER *TRIP HELP.UBER.COM"
       'help.uber.com',
       'uber trip'
     ];
@@ -108,39 +120,44 @@ export const useFinanceStore = () => {
     const subscriptionTxns = spending.filter(t => {
       const merchantLower = t.merchant_canonical.toLowerCase();
       const rawLower = t.merchant_raw.toLowerCase();
-      const combined = ` ${merchantLower} ${rawLower} `; // leading/trailing space for patterns
+      const combined = ` ${merchantLower} ${rawLower} `;
 
-      // 0a) Uber handling: only treat Uber One / membership as subscription.
+      // ----- Uber handling -----
       const containsUber = combined.includes('uber');
       const isUberSubscription = uberSubscriptionPatterns.some(p =>
         combined.includes(p)
       );
 
-      // If it's any kind of Uber transaction but NOT a membership pattern,
-      // exclude it from subscriptions (rides, Uber Eats, etc.).
+      // Any Uber transaction that is NOT clearly a membership → NOT a subscription
       if (containsUber && !isUberSubscription) {
         return false;
       }
 
-      // 0b) Explicitly exclude obvious non-subscription merchants (fuel, coffee, ticket machines, etc.)
+      // ----- global exclusions (fuel, coffee, ticket machines, etc.) -----
       if (nonSubscriptionMerchantPatterns.some(p => combined.includes(p))) {
         return false;
       }
 
-      // 1) If category is Subscriptions and not obviously excluded, treat as subscription
+      // ----- category-based subscriptions -----
       if (t.category === 'Subscriptions') {
         return true;
       }
 
-      // 2) Strict subscription merchants – treat as subscription even if they appear only once
+      // ----- apple-specific patterns -----
+      const isAppleSubscription = appleSubscriptionPatterns.some(p =>
+        combined.includes(p)
+      );
+
+      // ----- strict generic subscription merchants -----
       const matchesStrict = strictSubscriptionKeywords.some(
         kw => merchantLower.includes(kw) || rawLower.includes(kw)
       );
-      if (matchesStrict || isUberSubscription) {
+
+      if (matchesStrict || isAppleSubscription || isUberSubscription) {
         return true;
       }
 
-      // 3) Fuzzy keywords are *not* enough on their own in a single-month statement.
+      // ----- fuzzy names alone are NOT enough -----
       const matchesFuzzy = fuzzySubscriptionKeywords.some(
         kw => merchantLower.includes(kw) || rawLower.includes(kw)
       );
@@ -148,13 +165,15 @@ export const useFinanceStore = () => {
         return false;
       }
 
-      // Anything else is not a subscription
+      // Everything else is not a subscription
       return false;
     });
 
-    const uniqueSubscriptions = [...new Set(subscriptionTxns.map(t => t.merchant_canonical))];
-    
-    // Category totals (spending only)
+    const uniqueSubscriptions = [
+      ...new Set(subscriptionTxns.map(t => t.merchant_canonical))
+    ];
+
+    // ---------- CATEGORY TOTALS (SPENDING ONLY) ----------
     const byCategory: Record<string, { total: number; count: number }> = {};
     spending.forEach(t => {
       if (!byCategory[t.category]) {
@@ -172,8 +191,11 @@ export const useFinanceStore = () => {
       dateRange,
       subscriptionTxns,
       uniqueSubscriptions,
-      subscriptionTotal: subscriptionTxns.reduce((sum, t) => sum + absAmount(t.amount), 0),
-      byCategory,
+      subscriptionTotal: subscriptionTxns.reduce(
+        (sum, t) => sum + absAmount(t.amount),
+        0
+      ),
+      byCategory
     };
   }, [transactions]);
 
