@@ -403,5 +403,12 @@ export const KNOWN_MERCHANTS: Record<string, MerchantMetadata> = {
     aliases: ["apple com bil", "apple com bill", "applecom bil", "applecom bill", "apple bil", "apple bill", "icloud storage"],
     confidence: 0.95,
   },
+  uberone: {
+    canonical_name: "Uber One",
+    category: "Subscriptions",
+    subcategory: "Membership",
+    aliases: ["ubr pending uber", "pending uber", "uber one", "ubr pending"],
+    confidence: 0.95,
+  },
 };
 
