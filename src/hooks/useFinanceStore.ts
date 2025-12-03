@@ -59,8 +59,23 @@ export const useFinanceStore = () => {
     const income = transactions.filter(isIncome);
     const dateRange = getDateRange(transactions);
     
-    // Subscriptions: Money Out + category is Subscriptions
-    const subscriptionTxns = spending.filter(t => t.category === 'Subscriptions');
+    // Subscriptions: Money Out + (category is Subscriptions OR known recurring services)
+    // Common recurring services that may be categorized elsewhere
+    const recurringKeywords = [
+      'netflix', 'spotify', 'disney', 'amazon prime', 'apple tv', 'apple music',
+      'youtube', 'hbo', 'paramount', 'hulu', 'audible', 'kindle',
+      'voxi', 'ee', 'o2', 'three', 'vodafone', 'giffgaff', 'sky', 'virgin media', 'bt',
+      'puregym', 'gym', 'fitness', 'adobe', 'microsoft', 'icloud', 'google one',
+      'dropbox', 'notion', 'canva', 'chatgpt', 'openai'
+    ];
+    
+    const subscriptionTxns = spending.filter(t => {
+      if (t.category === 'Subscriptions') return true;
+      // Also check merchant name against common recurring services
+      const merchantLower = t.merchant_canonical.toLowerCase();
+      const rawLower = t.merchant_raw.toLowerCase();
+      return recurringKeywords.some(kw => merchantLower.includes(kw) || rawLower.includes(kw));
+    });
     const uniqueSubscriptions = [...new Set(subscriptionTxns.map(t => t.merchant_canonical))];
     
     // Category totals (spending only)

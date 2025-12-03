@@ -166,8 +166,8 @@ function detectColumnMapping(headers: string[]): Record<string, string> {
   
   // Amount columns (could be single or debit/credit split)
   const amountPatterns = ['amount', 'value', 'transaction amount'];
-  const debitPatterns = ['debit', 'paid out', 'withdrawal'];
-  const creditPatterns = ['credit', 'paid in', 'deposit'];
+  const debitPatterns = ['debit', 'paid out', 'withdrawal', 'money out'];
+  const creditPatterns = ['credit', 'paid in', 'deposit', 'money in'];
   
   for (const pattern of amountPatterns) {
     const index = lowerHeaders.findIndex(h => h === pattern || h === 'amount');
@@ -177,19 +177,35 @@ function detectColumnMapping(headers: string[]): Record<string, string> {
     }
   }
   
-  for (const pattern of debitPatterns) {
-    const index = lowerHeaders.findIndex(h => h.includes(pattern));
-    if (index !== -1) {
-      mapping.debit = headers[index];
-      break;
+  // Check for exact "Money Out" / "Money In" first (common UK bank format)
+  const moneyOutIndex = lowerHeaders.findIndex(h => h === 'money out' || h === 'moneyout');
+  const moneyInIndex = lowerHeaders.findIndex(h => h === 'money in' || h === 'moneyin');
+  
+  if (moneyOutIndex !== -1) {
+    mapping.debit = headers[moneyOutIndex];
+  }
+  if (moneyInIndex !== -1) {
+    mapping.credit = headers[moneyInIndex];
+  }
+  
+  // If not found, try broader patterns
+  if (!mapping.debit) {
+    for (const pattern of debitPatterns) {
+      const index = lowerHeaders.findIndex(h => h.includes(pattern));
+      if (index !== -1) {
+        mapping.debit = headers[index];
+        break;
+      }
     }
   }
   
-  for (const pattern of creditPatterns) {
-    const index = lowerHeaders.findIndex(h => h.includes(pattern));
-    if (index !== -1) {
-      mapping.credit = headers[index];
-      break;
+  if (!mapping.credit) {
+    for (const pattern of creditPatterns) {
+      const index = lowerHeaders.findIndex(h => h.includes(pattern));
+      if (index !== -1) {
+        mapping.credit = headers[index];
+        break;
+      }
     }
   }
   
