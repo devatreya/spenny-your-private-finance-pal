@@ -1,67 +1,21 @@
 import { useState, useCallback } from 'react';
-import { Transaction, ChatMessage } from '@/types/finance';
+import { Transaction, Category } from '@/lib/parser/schema';
 
-// Simple category detection based on keywords
-const categorizeTransaction = (description: string): string => {
-  const desc = description.toLowerCase();
-  
-  if (desc.includes('uber') || desc.includes('lyft') || desc.includes('bolt')) return 'Transport';
-  if (desc.includes('netflix') || desc.includes('spotify') || desc.includes('disney') || desc.includes('hbo') || desc.includes('subscription')) return 'Subscriptions';
-  if (desc.includes('amazon') || desc.includes('ebay') || desc.includes('shop')) return 'Shopping';
-  if (desc.includes('restaurant') || desc.includes('cafe') || desc.includes('coffee') || desc.includes('starbucks') || desc.includes('mcdonald')) return 'Food & Dining';
-  if (desc.includes('grocery') || desc.includes('walmart') || desc.includes('target') || desc.includes('supermarket')) return 'Groceries';
-  if (desc.includes('gas') || desc.includes('fuel') || desc.includes('shell') || desc.includes('chevron')) return 'Fuel';
-  if (desc.includes('rent') || desc.includes('mortgage')) return 'Housing';
-  if (desc.includes('electric') || desc.includes('water') || desc.includes('utility') || desc.includes('internet')) return 'Utilities';
-  if (desc.includes('gym') || desc.includes('fitness')) return 'Health & Fitness';
-  if (desc.includes('pharmacy') || desc.includes('doctor') || desc.includes('hospital')) return 'Healthcare';
-  if (desc.includes('salary') || desc.includes('payroll') || desc.includes('income')) return 'Income';
-  if (desc.includes('transfer')) return 'Transfer';
-  
-  return 'Other';
-};
-
-const parseCSV = (content: string): Transaction[] => {
-  const lines = content.trim().split('\n');
-  if (lines.length < 2) return [];
-  
-  const transactions: Transaction[] = [];
-  
-  // Skip header row
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    
-    // Simple CSV parsing (handles basic cases)
-    const parts = line.split(',').map(p => p.trim().replace(/^"|"$/g, ''));
-    
-    if (parts.length >= 3) {
-      const amount = parseFloat(parts[2]?.replace(/[^0-9.-]/g, '') || '0');
-      const transaction: Transaction = {
-        id: `txn-${i}-${Date.now()}`,
-        date: parts[0] || '',
-        description: parts[1] || '',
-        amount: Math.abs(amount),
-        category: categorizeTransaction(parts[1] || ''),
-        type: amount < 0 ? 'debit' : 'credit',
-      };
-      transactions.push(transaction);
-    }
-  }
-  
-  return transactions;
-};
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+}
 
 export const useFinanceStore = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  const loadTransactions = useCallback((fileContent: string) => {
-    const parsed = parseCSV(fileContent);
-    setTransactions(parsed);
-    setIsLoaded(parsed.length > 0);
-    return parsed.length;
+  const loadTransactions = useCallback((txns: Transaction[]) => {
+    setTransactions(txns);
+    setIsLoaded(txns.length > 0);
   }, []);
 
   const addMessage = useCallback((role: 'user' | 'assistant', content: string) => {
@@ -82,21 +36,25 @@ export const useFinanceStore = () => {
       return "I don't have any transaction data loaded yet. Please upload your bank statement first.";
     }
 
-    // Category spending
+    // Category spending query
     const categoryMatch = q.match(/(?:how much|spent|spend|spending).*(?:on|for)\s+(\w+)/i);
     if (categoryMatch) {
       const searchTerm = categoryMatch[1].toLowerCase();
       const filtered = transactions.filter(t => 
         t.category.toLowerCase().includes(searchTerm) || 
-        t.description.toLowerCase().includes(searchTerm)
+        t.merchant_canonical.toLowerCase().includes(searchTerm) ||
+        t.merchant_raw.toLowerCase().includes(searchTerm) ||
+        (t.description?.toLowerCase().includes(searchTerm))
       );
-      const total = filtered.filter(t => t.type === 'debit').reduce((sum, t) => sum + t.amount, 0);
+      const total = filtered
+        .filter(t => t.amount < 0)
+        .reduce((sum, t) => sum + Math.abs(t.amount), 0);
       
       if (filtered.length === 0) {
         return `I couldn't find any transactions matching "${searchTerm}".`;
       }
       
-      return `You spent **$${total.toFixed(2)}** on ${searchTerm} across ${filtered.length} transaction(s).`;
+      return `You spent **£${total.toFixed(2)}** on ${searchTerm} across ${filtered.length} transaction(s).`;
     }
 
     // Subscriptions breakdown
@@ -106,41 +64,72 @@ export const useFinanceStore = () => {
         return "I couldn't find any subscription transactions.";
       }
       
-      const total = subs.reduce((sum, t) => sum + t.amount, 0);
-      const breakdown = subs.map(s => `- ${s.description}: $${s.amount.toFixed(2)}`).join('\n');
+      const total = subs.reduce((sum, t) => sum + Math.abs(t.amount), 0);
+      const breakdown = subs.map(s => `- ${s.merchant_canonical}: £${Math.abs(s.amount).toFixed(2)}`).join('\n');
       
-      return `**Your Subscriptions ($${total.toFixed(2)} total):**\n\n${breakdown}`;
+      return `**Your Subscriptions (£${total.toFixed(2)} total):**\n\n${breakdown}`;
     }
 
     // Total spending
     if (q.includes('total') && (q.includes('spent') || q.includes('spending'))) {
-      const total = transactions.filter(t => t.type === 'debit').reduce((sum, t) => sum + t.amount, 0);
-      return `Your total spending is **$${total.toFixed(2)}** across ${transactions.filter(t => t.type === 'debit').length} transactions.`;
+      const total = transactions
+        .filter(t => t.amount < 0)
+        .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+      return `Your total spending is **£${total.toFixed(2)}** across ${transactions.filter(t => t.amount < 0).length} transactions.`;
     }
 
     // Category breakdown
     if (q.includes('breakdown') || q.includes('categories') || q.includes('summary')) {
       const byCategory: Record<string, number> = {};
-      transactions.filter(t => t.type === 'debit').forEach(t => {
-        byCategory[t.category] = (byCategory[t.category] || 0) + t.amount;
+      transactions.filter(t => t.amount < 0).forEach(t => {
+        byCategory[t.category] = (byCategory[t.category] || 0) + Math.abs(t.amount);
       });
       
       const sorted = Object.entries(byCategory).sort((a, b) => b[1] - a[1]);
-      const breakdown = sorted.map(([cat, amt]) => `- **${cat}:** $${amt.toFixed(2)}`).join('\n');
+      const breakdown = sorted.map(([cat, amt]) => `- **${cat}:** £${amt.toFixed(2)}`).join('\n');
       const total = sorted.reduce((sum, [, amt]) => sum + amt, 0);
       
-      return `**Spending Breakdown ($${total.toFixed(2)} total):**\n\n${breakdown}`;
+      return `**Spending Breakdown (£${total.toFixed(2)} total):**\n\n${breakdown}`;
     }
 
     // Largest transactions
     if (q.includes('largest') || q.includes('biggest') || q.includes('highest')) {
-      const sorted = [...transactions].filter(t => t.type === 'debit').sort((a, b) => b.amount - a.amount).slice(0, 5);
-      const list = sorted.map((t, i) => `${i + 1}. ${t.description}: $${t.amount.toFixed(2)}`).join('\n');
+      const sorted = [...transactions]
+        .filter(t => t.amount < 0)
+        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
+        .slice(0, 5);
+      const list = sorted.map((t, i) => 
+        `${i + 1}. ${t.merchant_canonical}: £${Math.abs(t.amount).toFixed(2)} (${t.date})`
+      ).join('\n');
       
       return `**Your 5 Largest Transactions:**\n\n${list}`;
     }
 
-    return "I can help you analyze your spending! Try asking:\n- \"How much did I spend on Uber?\"\n- \"Give me a breakdown of my spending\"\n- \"What are my subscriptions?\"\n- \"What were my largest transactions?\"";
+    // Income
+    if (q.includes('income') || q.includes('earned') || q.includes('received')) {
+      const income = transactions.filter(t => t.amount > 0);
+      const total = income.reduce((sum, t) => sum + t.amount, 0);
+      
+      if (income.length === 0) {
+        return "I couldn't find any income transactions.";
+      }
+      
+      return `**Total Income:** £${total.toFixed(2)} across ${income.length} transaction(s).`;
+    }
+
+    // Merchant-specific
+    const merchants = [...new Set(transactions.map(t => t.merchant_canonical))];
+    for (const merchant of merchants) {
+      if (q.includes(merchant.toLowerCase())) {
+        const filtered = transactions.filter(t => 
+          t.merchant_canonical.toLowerCase() === merchant.toLowerCase()
+        );
+        const total = filtered.reduce((sum, t) => sum + Math.abs(t.amount), 0);
+        return `You had **${filtered.length} transaction(s)** with ${merchant}, totaling **£${total.toFixed(2)}**.`;
+      }
+    }
+
+    return "I can help you analyze your spending! Try asking:\n- \"How much did I spend on Uber?\"\n- \"Give me a breakdown of my spending\"\n- \"What are my subscriptions?\"\n- \"What were my largest transactions?\"\n- \"How much income did I receive?\"";
   }, [transactions]);
 
   const clearData = useCallback(() => {

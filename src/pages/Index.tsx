@@ -4,9 +4,14 @@ import { FileUpload } from '@/components/FileUpload';
 import { ChatInterface } from '@/components/ChatInterface';
 import { useFinanceStore } from '@/hooks/useFinanceStore';
 import { Button } from '@/components/ui/button';
+import { Transaction } from '@/lib/parser/schema';
 
 const Index = () => {
   const { messages, isLoaded, loadTransactions, addMessage, analyzeQuery, clearData } = useFinanceStore();
+
+  const handleFileLoaded = useCallback((transactions: Transaction[]) => {
+    loadTransactions(transactions);
+  }, [loadTransactions]);
 
   const handleSendMessage = useCallback((content: string) => {
     addMessage('user', content);
@@ -60,7 +65,7 @@ const Index = () => {
             </div>
 
             <div className="w-full max-w-md">
-              <FileUpload onFileLoaded={loadTransactions} />
+              <FileUpload onFileLoaded={handleFileLoaded} />
             </div>
 
             <div className="mt-12 grid grid-cols-3 gap-6 text-center">
