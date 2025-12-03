@@ -69,7 +69,7 @@ export const useFinanceStore = () => {
       'icloud', 'google one', 'dropbox'
     ];
 
-    // Apple storage / subscriptions show up under these patterns on most statements
+    // Apple storage / subscriptions patterns (e.g. iCloud)
     const appleSubscriptionPatterns = [
       'apple.com/bill',
       'apple.com bill',
@@ -80,7 +80,7 @@ export const useFinanceStore = () => {
       'apple.com/bill*icloud'
     ];
 
-    // Uber One / membership patterns (subscription)
+    // Uber One / Uber membership patterns (subscription only)
     const uberSubscriptionPatterns = [
       'uber one',
       'uberone',
@@ -122,31 +122,24 @@ export const useFinanceStore = () => {
       const rawLower = t.merchant_raw.toLowerCase();
       const combined = ` ${merchantLower} ${rawLower} `;
 
-      // ----- Uber handling (MUST come before category check) -----
-      const containsUber = combined.includes('uber') || combined.includes('ubr');
-      const containsEats = combined.includes('eats');
-      const containsTrip = combined.includes('trip');
-      
-      // Only Uber One patterns should be subscriptions
-      const isUberSubscription = !containsEats && !containsTrip && uberSubscriptionPatterns.some(p =>
+      // ----- Uber handling -----
+      const containsUber = combined.includes('uber');
+      const isUberSubscription = uberSubscriptionPatterns.some(p =>
         combined.includes(p)
       );
 
       // Any Uber transaction that is NOT clearly a membership → NOT a subscription
-      // This check comes BEFORE category check to override any incorrect categorization
       if (containsUber && !isUberSubscription) {
-        console.log('Excluding Uber transaction:', { merchant_canonical: t.merchant_canonical, merchant_raw: t.merchant_raw, amount: t.amount, containsEats, containsTrip });
         return false;
       }
 
-      // ----- global exclusions (fuel, coffee, ticket machines, etc.) -----
+      // ----- global exclusions (fuel, coffee, ticket machines, Uber Eats, etc.) -----
       if (nonSubscriptionMerchantPatterns.some(p => combined.includes(p))) {
         return false;
       }
 
       // ----- category-based subscriptions -----
       if (t.category === 'Subscriptions') {
-        console.log('Including via category:', { merchant_canonical: t.merchant_canonical, merchant_raw: t.merchant_raw, amount: t.amount });
         return true;
       }
 
@@ -161,7 +154,6 @@ export const useFinanceStore = () => {
       );
 
       if (matchesStrict || isAppleSubscription || isUberSubscription) {
-        console.log('Including subscription:', { merchant_canonical: t.merchant_canonical, merchant_raw: t.merchant_raw, amount: t.amount, category: t.category });
         return true;
       }
 
