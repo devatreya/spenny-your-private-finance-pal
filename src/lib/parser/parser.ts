@@ -7,6 +7,7 @@ import Papa from 'papaparse';
 import { Transaction, ParsedStatement } from './schema';
 import { cleanMerchantName, getCanonicalName, extractMerchantFromDescription } from './utils/merchantTools';
 import { parsePDF as parsePDFFile } from './pdfParser';
+import { categorizeTransactions } from './categorizer';
 
 // Simple UUID generator
 function generateId(): string {
@@ -31,13 +32,20 @@ export async function parseFile(
   const filename = options?.filename || file.name;
   const fileType = detectFileType(file);
   
+  let result: ParsedStatement;
+  
   if (fileType === 'csv') {
-    return parseCSV(file, filename);
+    result = await parseCSV(file, filename);
   } else if (fileType === 'pdf') {
-    return parsePDFFile(file, filename);
+    result = await parsePDFFile(file, filename);
   } else {
     throw new Error(`Unsupported file type: ${file.type}`);
   }
+  
+  // Apply categorization to all transactions
+  result.transactions = await categorizeTransactions(result.transactions);
+  
+  return result;
 }
 
 /**
