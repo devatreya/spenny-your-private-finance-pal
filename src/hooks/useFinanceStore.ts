@@ -62,9 +62,9 @@ export const useFinanceStore = () => {
     // STRICT keywords: Count as subscription even with single transaction
     const strictSubscriptionKeywords = [
       'netflix', 'spotify', 'disney', 'amazon prime', 'apple tv', 'apple music',
-      'youtube', 'hbo', 'paramount', 'hulu', 'audible', 'kindle',
+      'youtube premium', 'youtube', 'hbo', 'paramount', 'hulu', 'audible', 'kindle',
       'voxi', 'ee', 'o2', 'three', 'vodafone', 'giffgaff', 'sky', 'virgin media', 'bt',
-      'icloud', 'google one', 'dropbox'
+      'icloud', 'google one', 'dropbox', 'google youtube'
     ];
     
     // FUZZY keywords: Only count if they recur OR category is Subscriptions
@@ -72,11 +72,37 @@ export const useFinanceStore = () => {
       'gym', 'fitness', 'puregym', 'microsoft', 'adobe', 'notion', 'canva', 'chatgpt', 'openai'
     ];
     
+    // EXCLUSION keywords: These are NEVER subscriptions regardless of category
+    const exclusionKeywords = [
+      // Fuel stations
+      'bp', 'shell', 'esso', 'texaco', 'gulf', 'jet', 'murco', 'petrol', 'fuel',
+      // Coffee shops / cafes
+      'blank street', 'sq blank street', 'pret', 'costa', 'starbucks', 'nero', 'cafe', 'coffee',
+      // Ticket machines / transport pay-per-use
+      'ticket machine', 'lul ticket', 'tfl', 'oyster', 'station ticket',
+      // Food / restaurants
+      'uber eats', 'deliveroo', 'just eat', 'greggs', 'mcdonald', 'kfc', 'subway', 'nando'
+    ];
+    
     // Helper to check if merchant matches keywords
     const matchesKeywords = (t: Transaction, keywords: string[]): boolean => {
       const merchantLower = t.merchant_canonical.toLowerCase();
       const rawLower = t.merchant_raw.toLowerCase();
       return keywords.some(kw => merchantLower.includes(kw) || rawLower.includes(kw));
+    };
+    
+    // Helper to check if transaction should be excluded from subscriptions
+    const isExcluded = (t: Transaction): boolean => {
+      // Check exclusion keywords
+      if (matchesKeywords(t, exclusionKeywords)) return true;
+      
+      // Exclude certain categories that are never subscriptions
+      const nonSubCategories = ['Transport', 'Groceries', 'Eating Out', 'Cash', 'Shopping'];
+      if (nonSubCategories.includes(t.category) && !matchesKeywords(t, strictSubscriptionKeywords)) {
+        return true;
+      }
+      
+      return false;
     };
     
     // Count transactions per merchant for fuzzy recurrence check
@@ -87,6 +113,9 @@ export const useFinanceStore = () => {
     });
     
     const subscriptionTxns = spending.filter(t => {
+      // First check: Is this merchant excluded?
+      if (isExcluded(t)) return false;
+      
       // Path A: Category is Subscriptions
       if (t.category === 'Subscriptions') return true;
       
