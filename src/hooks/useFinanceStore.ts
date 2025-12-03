@@ -64,7 +64,16 @@ export const useFinanceStore = () => {
       'netflix', 'spotify', 'disney', 'amazon prime', 'apple tv', 'apple music',
       'youtube', 'hbo', 'paramount', 'hulu', 'audible', 'kindle',
       'voxi', 'ee', 'o2', 'three', 'vodafone', 'giffgaff', 'sky', 'virgin media', 'bt',
-      'icloud', 'google one', 'dropbox', 'apple.com', 'uber one', 'pending.uber', 'ubr pending uber'
+      'icloud', 'google one', 'dropbox', 'apple.com'
+    ];
+
+    // Uber subscription patterns - checked BEFORE non-subscription exclusions
+    const uberSubscriptionPatterns = [
+      'uber one',           // explicit membership wording
+      'pending.uber',       // from "UBR* PENDING.UBER."
+      'ubr* pending.uber',  // raw format
+      'uber pass',          // other common membership labels
+      'uber membership'
     ];
 
     // Generic / fuzzy names that could be one-offs – we do NOT automatically treat these as subscriptions
@@ -86,18 +95,30 @@ export const useFinanceStore = () => {
       'pret ',
       'costa',
       'uber eats',
+      'ubereats',
       'uber * eats',
       'eats pend',
       'deliveroo',
-      'just eat'
+      'just eat',
+      ' trip.uber',     // typical ride descriptor
+      'help.uber.com',
+      'uber trip'
     ];
 
     const subscriptionTxns = spending.filter(t => {
       const merchantLower = t.merchant_canonical.toLowerCase();
       const rawLower = t.merchant_raw.toLowerCase();
-      const combined = ` ${merchantLower} ${rawLower} `; // leading/trailing space for patterns like " bp "
+      const combined = ` ${merchantLower} ${rawLower} `; // spaces help with ' bp '
 
-      // 0) Explicitly exclude obvious non-subscription merchants
+      // 0a) Uber One / Uber membership – include these even if other patterns match
+      const isUberSubscription = uberSubscriptionPatterns.some(p =>
+        combined.includes(p)
+      );
+      if (isUberSubscription) {
+        return true;
+      }
+
+      // 0b) Explicitly exclude obvious non-subscription merchants
       if (nonSubscriptionMerchantPatterns.some(p => combined.includes(p))) {
         return false;
       }
@@ -116,7 +137,6 @@ export const useFinanceStore = () => {
       }
 
       // 3) Fuzzy keywords are *not* enough on their own in a single-month statement.
-      //    We only rely on them if category is already Subscriptions (handled above).
       const matchesFuzzy = fuzzySubscriptionKeywords.some(
         kw => merchantLower.includes(kw) || rawLower.includes(kw)
       );
