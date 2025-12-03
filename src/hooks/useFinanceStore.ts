@@ -59,22 +59,47 @@ export const useFinanceStore = () => {
     const income = transactions.filter(isIncome);
     const dateRange = getDateRange(transactions);
     
-    // Subscriptions: Money Out + (category is Subscriptions OR known recurring services)
-    // Common recurring services that may be categorized elsewhere
-    const recurringKeywords = [
+    // STRICT keywords: Count as subscription even with single transaction
+    const strictSubscriptionKeywords = [
       'netflix', 'spotify', 'disney', 'amazon prime', 'apple tv', 'apple music',
       'youtube', 'hbo', 'paramount', 'hulu', 'audible', 'kindle',
       'voxi', 'ee', 'o2', 'three', 'vodafone', 'giffgaff', 'sky', 'virgin media', 'bt',
-      'puregym', 'gym', 'fitness', 'adobe', 'microsoft', 'icloud', 'google one',
-      'dropbox', 'notion', 'canva', 'chatgpt', 'openai'
+      'icloud', 'google one', 'dropbox'
     ];
     
-    const subscriptionTxns = spending.filter(t => {
-      if (t.category === 'Subscriptions') return true;
-      // Also check merchant name against common recurring services
+    // FUZZY keywords: Only count if they recur OR category is Subscriptions
+    const fuzzySubscriptionKeywords = [
+      'gym', 'fitness', 'puregym', 'microsoft', 'adobe', 'notion', 'canva', 'chatgpt', 'openai'
+    ];
+    
+    // Helper to check if merchant matches keywords
+    const matchesKeywords = (t: Transaction, keywords: string[]): boolean => {
       const merchantLower = t.merchant_canonical.toLowerCase();
       const rawLower = t.merchant_raw.toLowerCase();
-      return recurringKeywords.some(kw => merchantLower.includes(kw) || rawLower.includes(kw));
+      return keywords.some(kw => merchantLower.includes(kw) || rawLower.includes(kw));
+    };
+    
+    // Count transactions per merchant for fuzzy recurrence check
+    const merchantCounts = new Map<string, number>();
+    spending.forEach(t => {
+      const key = t.merchant_canonical.toLowerCase();
+      merchantCounts.set(key, (merchantCounts.get(key) || 0) + 1);
+    });
+    
+    const subscriptionTxns = spending.filter(t => {
+      // Path A: Category is Subscriptions
+      if (t.category === 'Subscriptions') return true;
+      
+      // Path B: Strict keyword match (even once)
+      if (matchesKeywords(t, strictSubscriptionKeywords)) return true;
+      
+      // Path C: Fuzzy keyword match ONLY if it recurs (2+ transactions)
+      if (matchesKeywords(t, fuzzySubscriptionKeywords)) {
+        const count = merchantCounts.get(t.merchant_canonical.toLowerCase()) || 0;
+        return count >= 2;
+      }
+      
+      return false;
     });
     const uniqueSubscriptions = [...new Set(subscriptionTxns.map(t => t.merchant_canonical))];
     
