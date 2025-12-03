@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { Transaction, Category } from '@/lib/parser/schema';
+import { detectSubscriptions, Subscription } from '@/lib/parser/subscriptions';
 
 export interface ChatMessage {
   id: string;
@@ -59,24 +60,11 @@ export const useFinanceStore = () => {
     const income = transactions.filter(isIncome);
     const dateRange = getDateRange(transactions);
     
-    // Subscriptions: Money Out + (category is Subscriptions OR known recurring services)
-    // Common recurring services that may be categorized elsewhere
-    const recurringKeywords = [
-      'netflix', 'spotify', 'disney', 'amazon prime', 'apple tv', 'apple music',
-      'youtube', 'hbo', 'paramount', 'hulu', 'audible', 'kindle',
-      'voxi', 'ee', 'o2', 'three', 'vodafone', 'giffgaff', 'sky', 'virgin media', 'bt',
-      'puregym', 'gym', 'fitness', 'adobe', 'microsoft', 'icloud', 'google one',
-      'dropbox', 'notion', 'canva', 'chatgpt', 'openai'
-    ];
-    
-    const subscriptionTxns = spending.filter(t => {
-      if (t.category === 'Subscriptions') return true;
-      // Also check merchant name against common recurring services
-      const merchantLower = t.merchant_canonical.toLowerCase();
-      const rawLower = t.merchant_raw.toLowerCase();
-      return recurringKeywords.some(kw => merchantLower.includes(kw) || rawLower.includes(kw));
-    });
-    const uniqueSubscriptions = [...new Set(subscriptionTxns.map(t => t.merchant_canonical))];
+    // Subscriptions: Use pattern-based detection (consistent amounts + regular intervals)
+    // This correctly excludes one-off purchases like coffee or tube tickets
+    const detectedSubs = detectSubscriptions(transactions);
+    const subscriptionTxns = detectedSubs.flatMap(s => s.transactions);
+    const uniqueSubscriptions = detectedSubs.map(s => s.merchant);
     
     // Category totals (spending only)
     const byCategory: Record<string, { total: number; count: number }> = {};
