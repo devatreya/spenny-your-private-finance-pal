@@ -108,17 +108,21 @@ export const useFinanceStore = () => {
     const subscriptionTxns = spending.filter(t => {
       const merchantLower = t.merchant_canonical.toLowerCase();
       const rawLower = t.merchant_raw.toLowerCase();
-      const combined = ` ${merchantLower} ${rawLower} `; // spaces help with ' bp '
+      const combined = ` ${merchantLower} ${rawLower} `; // leading/trailing space for patterns
 
-      // 0a) Uber One / Uber membership – include these even if other patterns match
+      // 0a) Uber handling: only treat Uber One / membership as subscription.
+      const containsUber = combined.includes('uber');
       const isUberSubscription = uberSubscriptionPatterns.some(p =>
         combined.includes(p)
       );
-      if (isUberSubscription) {
-        return true;
+
+      // If it's any kind of Uber transaction but NOT a membership pattern,
+      // exclude it from subscriptions (rides, Uber Eats, etc.).
+      if (containsUber && !isUberSubscription) {
+        return false;
       }
 
-      // 0b) Explicitly exclude obvious non-subscription merchants
+      // 0b) Explicitly exclude obvious non-subscription merchants (fuel, coffee, ticket machines, etc.)
       if (nonSubscriptionMerchantPatterns.some(p => combined.includes(p))) {
         return false;
       }
@@ -132,7 +136,7 @@ export const useFinanceStore = () => {
       const matchesStrict = strictSubscriptionKeywords.some(
         kw => merchantLower.includes(kw) || rawLower.includes(kw)
       );
-      if (matchesStrict) {
+      if (matchesStrict || isUberSubscription) {
         return true;
       }
 
