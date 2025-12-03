@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
-import { Upload, FileText, CheckCircle } from 'lucide-react';
+import { Upload, FileText, CheckCircle, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { parsePDF, extractTransactionsFromText } from '@/lib/pdfParser';
 
 interface FileUploadProps {
   onFileLoaded: (content: string) => number;
@@ -10,23 +11,65 @@ export const FileUpload = ({ onFileLoaded }: FileUploadProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<string | null>(null);
   const [transactionCount, setTransactionCount] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleFile = useCallback((file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const content = e.target?.result as string;
-      const count = onFileLoaded(content);
+  const processCSV = useCallback((content: string, fileName: string) => {
+    const count = onFileLoaded(content);
+    setUploadedFile(fileName);
+    setTransactionCount(count);
+    setIsProcessing(false);
+    if (count === 0) {
+      setError('No transactions found. Please check your file format.');
+    }
+  }, [onFileLoaded]);
+
+  const processPDF = useCallback(async (file: File) => {
+    try {
+      setIsProcessing(true);
+      setError(null);
+      
+      const pdfText = await parsePDF(file);
+      const csvContent = extractTransactionsFromText(pdfText);
+      
+      const count = onFileLoaded(csvContent);
       setUploadedFile(file.name);
       setTransactionCount(count);
-    };
-    reader.readAsText(file);
+      setIsProcessing(false);
+      
+      if (count === 0) {
+        setError('No transactions detected. Try a CSV export from your bank.');
+      }
+    } catch (err) {
+      console.error('PDF parsing error:', err);
+      setError('Failed to parse PDF. Try exporting as CSV from your bank.');
+      setIsProcessing(false);
+    }
   }, [onFileLoaded]);
+
+  const handleFile = useCallback((file: File) => {
+    setError(null);
+    
+    if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
+      processPDF(file);
+    } else if (file.name.toLowerCase().endsWith('.csv') || file.type === 'text/csv') {
+      setIsProcessing(true);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target?.result as string;
+        processCSV(content, file.name);
+      };
+      reader.readAsText(file);
+    } else {
+      setError('Please upload a PDF or CSV file.');
+    }
+  }, [processCSV, processPDF]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file && (file.name.endsWith('.csv') || file.type === 'text/csv')) {
+    if (file) {
       handleFile(file);
     }
   }, [handleFile]);
@@ -38,7 +81,19 @@ export const FileUpload = ({ onFileLoaded }: FileUploadProps) => {
     }
   }, [handleFile]);
 
-  if (uploadedFile) {
+  if (isProcessing) {
+    return (
+      <div className="gradient-border p-8 text-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 text-primary animate-spin" />
+          <p className="text-foreground font-medium">Processing your statement...</p>
+          <p className="text-muted-foreground text-sm">This may take a moment</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (uploadedFile && transactionCount > 0) {
     return (
       <div className="gradient-border p-6 text-center">
         <div className="flex items-center justify-center gap-3 mb-2">
@@ -64,7 +119,7 @@ export const FileUpload = ({ onFileLoaded }: FileUploadProps) => {
     >
       <input
         type="file"
-        accept=".csv"
+        accept=".csv,.pdf"
         onChange={handleChange}
         className="hidden"
         id="file-upload"
@@ -83,9 +138,12 @@ export const FileUpload = ({ onFileLoaded }: FileUploadProps) => {
               {isDragging ? 'Drop your statement here' : 'Upload your bank statement'}
             </p>
             <p className="text-muted-foreground text-sm">
-              CSV format • Processed locally
+              PDF or CSV • Processed locally
             </p>
           </div>
+          {error && (
+            <p className="text-destructive text-sm mt-2">{error}</p>
+          )}
         </div>
       </label>
     </div>
